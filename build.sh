@@ -51,4 +51,13 @@ cp "$SRC/Info.plist" "$KEXT/Contents/Info.plist"
 # but ad-hoc keeps things well-formed).
 codesign --force --sign - "$KEXT" 2>/dev/null || true
 
+# Stage a clean distributable that contains ONLY the kext. Uploading the
+# kext directory directly would make upload-artifact flatten it into a bare
+# "Contents", losing the VoodooELAN.kext wrapper.
+DIST="$ROOT/dist"
+rm -rf "$DIST"
+mkdir -p "$DIST"
+cp -R "$KEXT" "$DIST/"
+
 echo "Done: $KEXT"
+echo "Dist: $DIST/VoodooELAN.kext"
