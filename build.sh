@@ -41,7 +41,9 @@ xcrun --sdk macosx clang++ \
 echo "[3/4] linking VoodooELAN.kext"
 xcrun --sdk macosx clang++ \
     -arch x86_64 -mmacosx-version-min=10.15 \
-    -nostdlib -fapple-kext -Wl,-kext -fno-exceptions -fno-rtti \
+    -nostdlib -fapple-kext -Wl,-kext \
+    -Wl,-sectcreate,__TEXT,__info_plist,"$SRC/Info.plist" \
+    -fno-exceptions -fno-rtti \
     "$OBJ/VoodooELAN.o" -o "$KEXT/Contents/MacOS/VoodooELAN"
 
 echo "[4/4] packaging kext"
