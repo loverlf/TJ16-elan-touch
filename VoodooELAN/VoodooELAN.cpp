@@ -35,6 +35,10 @@ static constexpr uint8_t  kMaxPoints = 10;
 static constexpr uint8_t  kReportIdTouch = 0x01;
 static constexpr uint8_t  kMinReportLength = 12;   // 2 (header) + 10 (slot)
 
+// Endpoint descriptor bit fields (USB 2.0 9.6.6).
+static constexpr uint8_t  kEPTypeInterrupt = 0x03; // bmAttributes & 0x03
+static constexpr uint8_t  kEPDirectionIn   = 0x80; // bEndpointAddress & 0x80
+
 bool VoodooELAN::start(IOService* provider) {
     if (!super::start(provider)) {
         IOLog("VoodooELAN: super::start failed\n");
@@ -80,14 +84,15 @@ bool VoodooELAN::setupPipe() {
     }
 
     // Find the interrupt IN endpoint.
-    const StandardUSB::EndpointDescriptor* ep = nullptr;
-    const IOUSBDescriptorHeader* current = nullptr;
+    const StandardUSB::Descriptor* current = nullptr;
     while ((current = StandardUSB::getNextAssociatedDescriptorWithType(
                 configDesc, ifaceDesc, current, StandardUSB::kDescriptorTypeEndpoint)) != nullptr) {
         const StandardUSB::EndpointDescriptor* e = (const StandardUSB::EndpointDescriptor*)current;
-        if (StandardUSB::getEndpointType(e) != StandardUSB::kUSBAttributeInterrupt) continue;
-        if (StandardUSB::getEndpointDirection(e) != StandardUSB::kUSBEndpointDirectionIn) continue;
-        readBufferSize = StandardUSB::getEndpointMaxPacketSize(e);
+        if (StandardUSB::getEndpointType(e) != kEPTypeInterrupt) continue;
+        if (StandardUSB::getEndpointDirection(e) != kEPDirectionIn) continue;
+        IOUSBHostDevice* device = interface->getDevice();
+        uint32_t speed = device ? (uint32_t)device->getSpeed() : 0;
+        readBufferSize = StandardUSB::getEndpointMaxPacketSize(speed, e);
         interruptPipe = interface->copyPipe(StandardUSB::getEndpointAddress(e));
         break;
     }
@@ -103,18 +108,16 @@ bool VoodooELAN::setupPipe() {
         return false;
     }
 
-    readCompletion = IOUSBHostCompletion::withAction(&readCompletionAction, this);
-    if (!readCompletion) {
-        IOLog("VoodooELAN: could not allocate completion\n");
-        return false;
-    }
+    readCompletion.owner = this;
+    readCompletion.action = &readCompletionAction;
+    readCompletion.parameter = nullptr;
 
     return true;
 }
 
 void VoodooELAN::startRead() {
-    if (!interruptPipe || !readBuffer || !readCompletion) return;
-    IOReturn status = interruptPipe->io(readBuffer, readBufferSize, readCompletion, 0);
+    if (!interruptPipe || !readBuffer) return;
+    IOReturn status = interruptPipe->io(readBuffer, readBufferSize, &readCompletion, 0);
     if (status != kIOReturnSuccess) {
         IOLog("VoodooELAN: failed to queue read (0x%x)\n", status);
     }
@@ -230,18 +233,18 @@ void VoodooELAN::sendEvent(const uint8_t* report, uint32_t reportLength) {
 }
 
 IOService* VoodooELAN::findVoodooInput() {
-    OSArray* children = copyChildServices(gIOServicePlane);
-    if (!children) return nullptr;
+    OSIterator* iter = getChildIterator(gIOServicePlane);
+    if (!iter) return nullptr;
 
     IOService* found = nullptr;
-    for (unsigned int i = 0; i < children->getCount(); i++) {
-        IOService* child = OSDynamicCast(IOService, children->getObject(i));
+    while (OSObject* obj = iter->getNextObject()) {
+        IOService* child = OSDynamicCast(IOService, obj);
         if (child && child->getProperty(VOODOO_INPUT_IDENTIFIER) != nullptr) {
             found = child;
             break;
         }
     }
-    children->release();
+    iter->release();
     return found;
 }
 
@@ -265,10 +268,6 @@ void VoodooELAN::stop(IOService* provider) {
     if (readBuffer) {
         readBuffer->release();
         readBuffer = nullptr;
-    }
-    if (readCompletion) {
-        readCompletion->release();
-        readCompletion = nullptr;
     }
     voodooInput = nullptr;
     super::stop(provider);

@@ -24,7 +24,7 @@ private:
     IOUSBHostPipe* interruptPipe = nullptr;
     IOBufferMemoryDescriptor* readBuffer = nullptr;
     UInt32 readBufferSize = 0;
-    IOUSBHostCompletion* readCompletion = nullptr;
+    IOUSBHostCompletion readCompletion;   // plain struct, copied by io()
     IOService* voodooInput = nullptr;
 
     // Per-slot previous coordinates so VoodooInput / AppleMultitouch can
